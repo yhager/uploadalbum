@@ -1,0 +1,78 @@
+<html>
+<head>
+<title>Gallery2 Album Upload to SmugMug in Perl</title>
+</head>
+<body>
+<h1>Gallery2 Album Upload to SmugMug in Perl</h1>
+<a href="#description">Description</a>|<a href="#requirements">Requirements</a>|<a href="#inputs">Inputs needed</a>|<a href="#function">What this script does</a>|<a href="#license">License</a>|<a href="#download">Download</a>|<a href="#help">Feedback/Help</a>
+<h2>Description</h2><a name="description"></a> 
+<p>This perl script can help you upload your images from you Gallery2 to SmugMug.<br />
+It is based on Jeremy Mooney's <a href="http://jeremy.qux.net/projects/sm-fileupload/">FileUpload for SmugMug</a>. Jeremy graciously agreed that I can extend his script and release it in this version specialized on Gallery2. <em>Thank you!</em>
+If you just want to upload single files in an automated fashion or have iphoto albums to upload, check out his <a href="http://jeremy.qux.net/projects/sm-fileupload/">website</a>.</p>
+
+<h2>Requirements</h2><a name="requirements"></a>
+<p><ul>
+<li>Access to the Linux Server where <a href="http://gallery.menalto.com">Gallery2</a> keeps its data (the g2data directory).</li>
+<li>Access to the mysql server running the G2 database. I guess you could copy the g2data/albums directory and the mysql DB to a different linux host and do the upload from there - the actual G2 does not have to be running. This was developed on Gallery version 2.2.4 of the DB.</li>
+<li>Internet access and a login to <a href="http://www.smugmug.com/?referrer=Jssax0i2OBtZ6">SmugMug</a>. You can sign up for a <a href="http://www.smugmug.com/?referrer=Jssax0i2OBtZ6">free 14 day trial</a> without a Credit Card.</li>
+<li>Perl with the following Modules: DBI, LWP::UserAgent, HTTP::Request, a compatible SSL library such as Crypt::SSLeay, Digest::MD5, Cwd. I tested this running Perl v5.8.4</li>
+</ul></p>
+
+<h2>Inputs needed</h2><a name="inputs"></a>
+<p>There is two ways of putting the required parameters in: The config file (downlaod the template <a href="uploadalbum.cfg">"uploadalbum.cfg</a>) or via the command line.
+<ul>
+<li>directory = /home/user/g2data/albums/travel/brasil07, all jpg (jpeg) files from directory will be uploaded to SmugMug. Note that this directory need to be under the albums directory.</li>
+<li>database = 'DBI:mysql:databasename_g2:localhost', see <a href="http://search.cpan.org/~timb/DBI-1.601/DBI.pm#connect">cpan for documentation</a></li>
+<li>dbuser = 'dbuser', login for your mysql db</li>
+<li>dbpass = 'xxx', password for your mysql db</li>
+<li>email = 'user@example.com', SmugMug login email address</li>
+<li>pass = 'xxx', SmugMug login password</li>
+<li>albumid = 12345, optional, if you specify an existing album id, all pictures will go in there. If don't specify it, a new album by the name of the directory will be created.</li>
+<li>categoryid = 0, leave the default 0 for the 'Other' Category or specify a different CategoryID (see <a href="uploadalbum.cfg">"uploadalbum.cfg</a> for the standard options).</li>
+</ul></p>
+<p>Example call:<br/>
+<em>./uploadalbum --directory /home/user/g2data/albums/travel/brasil07 --database DBI:mysql:databasename_g2:localhost --dbuser user --dbpass pass --email user@example.com --pass smugpass</em></p>
+<p>You can easily upload all albums in your gallery using the find command (specify all other required parameters in the config file):<br />
+<em>find /home/user/g2data/albums -type d -exec ./uploadalbum --directory {} &#92;&#59;</em><br />(the last two characters are a backslash followed by a semi-colon)</p>
+
+<h2>What the script does</h2><a name="function"></a>
+<p><ol>
+<li>Check if the specified directory is valid, readable and under albums</li>
+<li>Login to SmugMug (https)</li>
+<li>Log into mysql db</li>
+<li>Finding the id of the album that is stored in the specified directory</li>
+<li>Creating a new album on SmugMug with the specified CategoryID, unless an AlbumID was specified</li>
+<li>Looping over all the jpeg files in the directory</li>
+<li>Looking up the title for each one, defaulting to the filename if missing</li>
+<li>Upload the file to the Album, continue with the next image</li>
+<li>Logging out the SmugMug Session</li>
+</ol>
+</p>
+
+<h2>License</h2><a name="license"></a>
+<p><a rel="license" href="http://creativecommons.org/licenses/by-sa/3.0/us/">
+<img alt="Creative Commons License" style="border-width:0" src="http://i.creativecommons.org/l/by-sa/3.0/us/88x31.png" />
+</a>
+<br />This work is licensed under a 
+<a rel="license" href="http://creativecommons.org/licenses/by-sa/3.0/us/">Creative Commons Attribution-Share Alike 3.0 United States License</a>.
+</p>
+
+<h2>Download</h2><a name="download"></a>
+<p>You only need the main file <a href="uploadalbum">uploadalbum</a> (right-click 'Save Link As'), but I recommend you also get the config file <a href="uploadalbum.cfg">uploadalbum.cfg</a> to go with it (the command line tends to get very long).</p>
+
+<h2>Feedback/Help</h2><a name="help"></a>
+<p>I do not promise to support this script or that I will always keep it up to date, when Gallery or SmugMug change things on a greater scale. However, if I have the time, I will do what I can to help you. Just drop me an email at marco (&auml;t) marcofrom (d&ouml;t) com.</p>
+<p>Alternatively, you can check out the <a href="http://www.dgrin.com/showthread.php?p=725212#post725212">Digital Grin Forum Thread</a>.</p>
+
+
+<script type="text/javascript">
+var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+document.write(unescape("%3Cscript src='" + gaJsHost + "google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E"));
+</script>
+<script type="text/javascript">
+var pageTracker = _gat._getTracker("UA-83424-1");
+pageTracker._initData();
+pageTracker._trackPageview();
+</script>
+</body>
+</html>

@@ -1,0 +1,276 @@
+#!/usr/bin/perl
+
+###############################################
+# Copyright 2007 Jeremy Mooney
+# http://jeremy.qux.net/projects/sm-fileupload/
+# Last Modified 2007-07-31
+###############################################
+
+use constant DEBUGGING => 1;
+
+use strict;
+use DBI;
+use LWP::UserAgent;
+use HTTP::Request;
+use Digest::MD5;
+use Cwd 'abs_path';
+
+#$| = 1; #had some flushing trouble
+
+# Parse input
+my %parsedargs;
+
+# load config from file
+if (-f 'uploadalbum.cfg') {
+  open(CONFIG, 'uploadalbum.cfg');
+  my @config_lines=<CONFIG>;
+  foreach my $config (@config_lines) {
+    eval $config;
+  }
+  close(CONFIG);
+}
+
+while($_ = shift @ARGV) {
+   if ($_ eq '--email') {
+      $parsedargs{'email'} = shift @ARGV;
+   } elsif ($_ eq '--pass') {
+      $parsedargs{'pass'} = shift @ARGV;
+   } elsif ($_ eq '--database') {
+      $parsedargs{'database'} = shift @ARGV;
+   } elsif ($_ eq '--dbuser') {
+      $parsedargs{'dbuser'} = shift @ARGV;
+   } elsif ($_ eq '--dbpass') {
+      $parsedargs{'dbpass'} = shift @ARGV;
+   } elsif ($_ eq '--albumid') {
+      $parsedargs{'albumid'} = shift @ARGV;
+   } elsif ($_ eq '--directory') {
+      $parsedargs{'directory'} = shift @ARGV;
+   } elsif ($_ eq '--categoryid') {
+      $parsedargs{'categoryid'} = shift @ARGV;
+   } elsif ($_) {
+      die "Expecting command at: $_\n";
+   }
+}
+
+unless ($parsedargs{'directory'}) {
+   print "Usage: uploadalbum.pl --directory <g2dataalbumdir>\n\te.g. ./uploadalbum.pl --directory /home/user/g2data/albums/travel/brasil07\n";
+   die "no directory specified!";
+}
+
+my $abs_path = abs_path($parsedargs{'directory'});
+print "Using path $abs_path\n" if DEBUGGING;
+my $album;
+if ($abs_path =~ /albums\/([\w\/-]+)$/) {
+  print "found $1\n" if DEBUGGING;
+  $album=$1;
+} else {
+  exit "The path $abs_path is not under a gallery2 albums directory!\n";
+}
+opendir(DIRHANDLE,$abs_path) || die "could not open $abs_path";
+
+# Logging in
+unless($parsedargs{'email'} && $parsedargs{'pass'}) {
+   die "Need to specify email and password (--email <email> --pass <passwd>)\n";
+}
+
+my $ua = LWP::UserAgent->new;
+$ua->agent('MarcosGallery2PerlUploader/0.1');
+
+my $request = HTTP::Request->new;
+$request->header('X-Smug-Version' => '1.1.1');
+$request->method('GET');
+
+$request->uri('https://api.smugmug.com/services/api/rest/1.2.1/?APIKey=275R7pVIpQNDkLTjRKoKP18NqwfHW2dO'.
+                '&EmailAddress='.$parsedargs{'email'}.
+                '&method=smugmug.login.withPassword'.
+                '&Password='.$parsedargs{'pass'}
+             );
+my $response = $ua->request($request);
+my $loginresp = $response->content;
+my $nickname = undef;
+if ($loginresp =~ m/<Session id=\"([^<]+)\"\/>/) {
+   $parsedargs{'sessionid'} = $1;
+   print "Session $parsedargs{'sessionid'}\n" if DEBUGGING;
+   if ($loginresp =~ m/NickName=\"([\w]+)\"/) {
+     $nickname = $1;
+     print "$nickname logged in successfully.\n";
+   }
+} else {
+   print "Oh no!\n";
+   die "Could not receive session key - invalid login?\n".($loginresp);
+}
+
+# Connecting to DB
+my $dbh = DBI->connect($parsedargs{'database'}, $parsedargs{'dbuser'}, $parsedargs{'dbpass'});
+if (not $dbh) {
+   die "DB error: $DBI::errstr";
+}
+
+#figuring out which album to look at
+my $parent = 0;
+my $albumname = '';
+foreach my $albumH (split(/\//,$album)) {
+  my $sql;
+  if ($parent == 0) {
+    $sql = "SELECT g_id FROM g2_FileSystemEntity WHERE g_pathComponent = \"$albumH\"";
+  } else {
+    $sql = "SELECT f.g_id FROM g2_FileSystemEntity f, g2_ChildEntity c WHERE g_pathComponent = \"$albumH\" AND c.g_id = f.g_id AND c.g_parentId = $parent";
+  }
+  my @dir_result = $dbh->selectrow_array($sql);
+  my $test = scalar(@dir_result);
+  if (not $test) {
+      exit "Album $albumH ($album) is not in DB!\n";
+  }
+  if ($test > 1) {
+      exit "Found dupes! Album $albumH ($album)!\n";
+  }
+  foreach my $id (@dir_result) {
+    print "album id = $id\n" if DEBUGGING;
+    $parent = $id;
+    $albumname = $albumH;
+  }
+}
+unless ($parent) { die "Couldn't figure out parent album.\n"; }
+print "Using Album $albumname (Gallery2 ID $parent).\n";
+
+unless ($parsedargs{'albumid'}) {
+	$parsedargs{'albumid'} = createalbum();
+}
+
+
+my $direntry;
+while ($direntry = readdir DIRHANDLE) {
+   next unless ($direntry =~ m/\.[Jj][Pp][Ee]?[Gg]$/);
+   my ($filename,$filepath); 
+   $filepath = "$parsedargs{'directory'}\/$direntry";
+   if (-f $filepath) {
+     print "$filepath exists, querying DB\n" if DEBUGGING;
+     $parsedargs{'file'} = $filepath;
+     my @id_result = $dbh->selectrow_array("SELECT f.g_id FROM g2_FileSystemEntity f, g2_ChildEntity c WHERE g_pathComponent = \"$direntry\" AND c.g_id = f.g_id AND c.g_parentId = $parent");
+     my $test = scalar(@id_result);
+      if (not $test) {
+          print "$direntry is not in DB, next\n";
+          next;
+      }
+      if ($test > 1) {
+          exit "Found dupes! That shouldn't happen for $direntry!\n";
+      }
+     foreach my $id (@id_result) {
+       print "G2 image id = $id\n" if DEBUGGING;
+       my $title_result = $dbh->prepare("SELECT g_title AS title FROM g2_Item where g_id = $id");
+       $title_result->execute;
+       if (not $title_result) {
+         print "$direntry has no caption defaulting to filename\n";
+         $parsedargs{'caption'} = $direntry;
+       } else {
+         my($title)=$title_result->fetchrow_array;
+         if (not $title) {
+           print "$direntry has no caption defaulting to filename\n";
+           $parsedargs{'caption'} = $direntry;
+         } else {
+           print "Found G2 title $title\n" if DEBUGGING;;
+           $parsedargs{'caption'} = $title;
+         }
+       }
+     }
+     
+   } else {
+     print "Image $filepath not found, trying next\n";
+     next;
+   }
+   print "Uploading $direntry (with Caption \"$parsedargs{'caption'}\")... ";
+   upload();
+}
+print "All done! ";
+print "To see your new album visit\nhttp://$nickname.smugmug.com/gallery/$parsedargs{'albumid'} \n";
+logout();
+exit 0;
+
+
+sub logout() {
+   my $request = HTTP::Request->new;
+   $request->header('X-Smug-Version' => '1.1.1');
+   $request->method('GET');
+
+   $request->uri('https://api.smugmug.com/services/api/rest/1.2.1/?APIKey=275R7pVIpQNDkLTjRKoKP18NqwfHW2dO'.
+                   '&method=smugmug.logout&SessionID='.$parsedargs{'sessionid'});
+   my $response = $ua->request($request);
+   if ($response->is_success) { # We don't care what the server says - if it was valid or not before, just that server saw logout request
+      print "Done logging out.\n" if DEBUGGING;
+      exit 0;
+   } else {
+      die "Error running logout: ".$response->status_line;
+   } 
+}
+
+sub upload() {
+  my $request = HTTP::Request->new;
+  $request->header('X-Smug-Version' => '1.2.1');
+  $request->header('X-Smug-SessionID' => $parsedargs{'sessionid'});
+  $request->header('X-Smug-ResponseType' => 'REST');
+  $request->header('X-Smug-AlbumID' => $parsedargs{'albumid'});
+  if ($parsedargs{'caption'}) {
+     $request->header('X-Smug-Caption' => $parsedargs{'caption'});
+  }
+     
+  my $md5hash = Digest::MD5->new;
+  
+  open(FILE,$parsedargs{'file'}) || die "Could not open file $parsedargs{'file'}";
+  binmode FILE;
+  $md5hash->addfile(*FILE);
+  seek FILE,0,0;
+  my $filedata;
+  my $buffer;
+  while(read FILE,$buffer,1024) {
+     $filedata .= $buffer;
+  }
+  close(FILE);
+  my $hashvalue = $md5hash->hexdigest();
+  
+  $request->header('Content-MD5', $hashvalue);
+  $request->header('Content-Length',length($filedata));
+  $request->method('POST');
+  $request->uri('http://upload.smugmug.com/photos/xmlrawadd.mg');
+  
+  $request->content($filedata);
+  
+  my $response = $ua->request($request);
+  
+  if ($response->is_success) {
+     my $result = $response->content;
+     if ($result =~ m/<ImageID>([^<]+)<\/ImageID>/) {
+        print "SmugMug ImageID $1\n";
+     } else {
+        $result =~ m/<rsp stat="fail">\s*(.*)\s*<\/rsp>/s;
+        print "ERROR uploading image $parsedargs{'file'}! $1\n";
+     }
+  } else {
+     print "ERROR uploading image $parsedargs{'file'}! $response->status_line\n";
+  }
+}
+
+sub createalbum () {
+   my $request = HTTP::Request->new;
+   $request->header('X-Smug-Version' => '1.2.1');
+   $request->method('GET');
+   if (not $parsedargs{'categoryid'} =~ /\d+/) { $parsedargs{'categoryid'} = 0; }
+   print "Creating Album $albumname CategoryID ".$parsedargs{'categoryid'};
+   $request->uri('https://api.smugmug.com/services/api/rest/1.2.1/?APIKey=275R7pVIpQNDkLTjRKoKP18NqwfHW2dO'.
+	               '&method=smugmug.albums.create'.
+	               '&SessionID='.$parsedargs{'sessionid'}.
+	               '&Title='.$albumname.
+	               '&CategoryID='.$parsedargs{'categoryid'});
+   my $response = $ua->request($request);
+   if ($response->is_success) { 
+      my $result = $response->content;
+      if ($result =~ m/<Album id=\"([^<]+)\"\/>/) {
+         print "- got SmugMug Album ID $1\n";
+         return $1;
+      } else {
+         $result =~ m/<rsp stat="fail">\s*(.*)\s*<\/rsp>/s;
+	 die "ERROR creating Album!\n$result\n";
+      }
+   } else {
+      die "ERROR creating album!: ".$response->status_line;
+   } 	
+}
