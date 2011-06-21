@@ -6,6 +6,8 @@
 # Last Modified 2007-07-31
 ###############################################
 
+### Bugfix modification by Andrew Maiman on 2008-09-05 ###
+
 use constant DEBUGGING => 1;
 
 use strict;
@@ -16,6 +18,8 @@ use Digest::MD5;
 use Cwd 'abs_path';
 
 #$| = 1; #had some flushing trouble
+
+my $albumurl; #upload code will catch the full album url with key
 
 # Parse input
 my %parsedargs;
@@ -47,6 +51,10 @@ while($_ = shift @ARGV) {
       $parsedargs{'directory'} = shift @ARGV;
    } elsif ($_ eq '--categoryid') {
       $parsedargs{'categoryid'} = shift @ARGV;
+   } elsif ($_ eq '--nofilenamecaptions') {
+      $parsedargs{'nofilenamecaptions'} = 1;
+   } elsif ($_ eq '--captionsfromdescription') {
+      $parsedargs{'captionsfromdescription'} = 1;
    } elsif ($_) {
       die "Expecting command at: $_\n";
    }
@@ -156,17 +164,24 @@ while ($direntry = readdir DIRHANDLE) {
           exit "Found dupes! That shouldn't happen for $direntry!\n";
       }
      foreach my $id (@id_result) {
+       $parsedargs{'caption'} = ""; #reset caption
        print "G2 image id = $id\n" if DEBUGGING;
-       my $title_result = $dbh->prepare("SELECT g_title AS title FROM g2_Item where g_id = $id");
-       $title_result->execute;
+	my $title_result;
+       if ($parsedargs{'captionsfromdescription'} == 1) {
+         $title_result = $dbh->prepare("SELECT g_description AS title FROM g2_Item where g_id = $id");
+       } else { 
+         $title_result = $dbh->prepare("SELECT g_title AS title FROM g2_Item where g_id = $id"); }   
+      $title_result->execute;
        if (not $title_result) {
+	if (not ($parsedargs{'nofilenamecaptions'} == 1)) {
          print "$direntry has no caption defaulting to filename\n";
-         $parsedargs{'caption'} = $direntry;
+         $parsedargs{'caption'} = $direntry; }
        } else {
          my($title)=$title_result->fetchrow_array;
          if (not $title) {
+          if (not ($parsedargs{'nofilenamecaptions'} == 1)) {
            print "$direntry has no caption defaulting to filename\n";
-           $parsedargs{'caption'} = $direntry;
+           $parsedargs{'caption'} = $direntry; }
          } else {
            print "Found G2 title $title\n" if DEBUGGING;;
            $parsedargs{'caption'} = $title;
@@ -182,7 +197,7 @@ while ($direntry = readdir DIRHANDLE) {
    upload();
 }
 print "All done! ";
-print "To see your new album visit\nhttp://$nickname.smugmug.com/gallery/$parsedargs{'albumid'} \n";
+print "To see your new album visit:\n$albumurl\n";
 logout();
 exit 0;
 
@@ -238,12 +253,18 @@ sub upload() {
   
   if ($response->is_success) {
      my $result = $response->content;
-     if ($result =~ m/<ImageID>([^<]+)<\/ImageID>/) {
+     if ($result =~ m/<Image id=\"([^<]+)\" Key/) {
         print "SmugMug ImageID $1\n";
      } else {
         $result =~ m/<rsp stat="fail">\s*(.*)\s*<\/rsp>/s;
         print "ERROR uploading image $parsedargs{'file'}! $1\n";
+
+	$result = $response->content;
      }
+
+    if ($result =~ m/URL=\"([^<]+)#/) {
+        $albumurl = $1  }
+
   } else {
      print "ERROR uploading image $parsedargs{'file'}! $response->status_line\n";
   }
@@ -263,7 +284,7 @@ sub createalbum () {
    my $response = $ua->request($request);
    if ($response->is_success) { 
       my $result = $response->content;
-      if ($result =~ m/<Album id=\"([^<]+)\"\/>/) {
+      if ($result =~ m/<Album id=\"([^<]+)\" /) {
          print "- got SmugMug Album ID $1\n";
          return $1;
       } else {
