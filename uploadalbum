@@ -166,26 +166,33 @@ while ($direntry = readdir DIRHANDLE) {
      foreach my $id (@id_result) {
        $parsedargs{'caption'} = ""; #reset caption
        print "G2 image id = $id\n" if DEBUGGING;
-	my $title_result;
-       if ($parsedargs{'captionsfromdescription'} == 1) {
-         $title_result = $dbh->prepare("SELECT g_description AS title FROM g2_Item where g_id = $id");
-       } else { 
-         $title_result = $dbh->prepare("SELECT g_title AS title FROM g2_Item where g_id = $id"); }   
-      $title_result->execute;
-       if (not $title_result) {
+       my $title = '';
+       my $title_result;
+       $title_result = $dbh->prepare("SELECT g_description, g_summary, g_title FROM g2_Item where g_id = $id");
+       $title_result->execute;
+       my($g_desc,$g_sum,$g_title)=$title_result->fetchrow_array;
+       if ($parsedargs{'captionsfromdescription'}) {
+         if ($g_desc) {
+	   $title = $g_desc;
+	 } elsif ($g_sum) {
+	   $title = $g_sum;
+	 }
+       }
+       if (not $title) {
+         $title = $g_title;
+       } elsif ($parsedargs{'nofilenamecaptions'} == 1) {
+         # handle filename titles that got saved into the DB
+	 if ($title eq $direntry) {
+	   $title = '';
+	 }
+       }
+       if (not $title) {
 	if (not ($parsedargs{'nofilenamecaptions'} == 1)) {
          print "$direntry has no caption defaulting to filename\n";
          $parsedargs{'caption'} = $direntry; }
        } else {
-         my($title)=$title_result->fetchrow_array;
-         if (not $title) {
-          if (not ($parsedargs{'nofilenamecaptions'} == 1)) {
-           print "$direntry has no caption defaulting to filename\n";
-           $parsedargs{'caption'} = $direntry; }
-         } else {
-           print "Found G2 title $title\n" if DEBUGGING;;
-           $parsedargs{'caption'} = $title;
-         }
+         print "Found G2 title $title\n" if DEBUGGING;;
+         $parsedargs{'caption'} = $title;
        }
      }
      
