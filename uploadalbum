@@ -83,6 +83,7 @@ unless($parsedargs{'email'} && $parsedargs{'pass'}) {
 
 my $ua = LWP::UserAgent->new;
 $ua->agent('MarcosGallery2PerlUploader/0.1');
+$ua->cookie_jar( {} );
 
 my $request = HTTP::Request->new;
 $request->header('X-Smug-Version' => '1.1.1');
